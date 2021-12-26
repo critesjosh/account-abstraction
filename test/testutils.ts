@@ -16,6 +16,7 @@ export const AddressZero = ethers.constants.AddressZero
 export const HashZero = ethers.constants.HashZero
 export const ONE_ETH = parseEther('1');
 export const TWO_ETH = parseEther('2');
+export const FIVE_ETH = parseEther('5');
 
 export const tostr = (x: any) => x != null ? x.toString() : 'null'
 

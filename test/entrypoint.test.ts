@@ -24,13 +24,13 @@ import {
   ONE_ETH,
   TWO_ETH,
   deployEntryPoint,
-  getBalance
+  getBalance, FIVE_ETH
 } from "./testutils";
 import {fillAndSign} from "./UserOp";
 import {UserOperation} from "./UserOperation";
 import {PopulatedTransaction} from "ethers/lib/ethers";
 import {ethers} from 'hardhat'
-import {parseEther} from "ethers/lib/utils";
+import {formatEther, parseEther} from "ethers/lib/utils";
 import {debugTransaction} from './debugTx';
 
 describe("EntryPoint", function () {
@@ -43,7 +43,7 @@ describe("EntryPoint", function () {
   let ethersSigner = ethers.provider.getSigner();
   let wallet: SimpleWallet
 
-  const unstakeDelaySec = 2
+  const globalUnstakeDelaySec = 2
   const paymasterStake = ethers.utils.parseEther('1')
 
   before(async function () {
@@ -51,7 +51,7 @@ describe("EntryPoint", function () {
     await checkForGeth()
 
     testUtil = await new TestUtil__factory(ethersSigner).deploy()
-    entryPoint = await deployEntryPoint(paymasterStake, unstakeDelaySec)
+    entryPoint = await deployEntryPoint(paymasterStake, globalUnstakeDelaySec)
 
     //static call must come from address zero, to validate it can only be called off-chain.
     entryPointView = entryPoint.connect(ethers.provider.getSigner(AddressZero))
@@ -66,12 +66,23 @@ describe("EntryPoint", function () {
       addr = await ethersSigner.getAddress()
     })
 
+    it('should deposit for transfer into EntryPoint', async () => {
+      let signer2 = ethers.provider.getSigner(2);
+      await signer2.sendTransaction({to: entryPoint.address, value: ONE_ETH})
+      expect(await entryPoint.balanceOf(await signer2.getAddress())).to.eql(ONE_ETH)
+      expect(await entryPoint.getDepositInfo(await signer2.getAddress())).to.eql({
+        amount: ONE_ETH,
+        unstakeDelaySec: 0,
+        withdrawTime: 0
+      })
+    });
+
     describe('without stake', () => {
       it('should return no stake', async () => {
         expect(await entryPoint.isPaymasterStaked(addr, TWO_ETH)).to.eq(false)
       })
       it('should fail to unlock', async () => {
-        await expect(entryPoint.unlockStake()).to.revertedWith('no stake')
+        await expect(entryPoint.unstakeDeposit()).to.revertedWith('not staked')
       })
     })
     describe('with stake of 2 eth', () => {
@@ -80,47 +91,46 @@ describe("EntryPoint", function () {
       })
       it('should report "staked" state', async () => {
         expect(await entryPoint.isPaymasterStaked(addr, 0)).to.eq(true)
-        const {stake, withdrawStake, withdrawTime} = await entryPoint.getStakeInfo(addr)
-        expect({stake, withdrawStake, withdrawTime}).to.eql({
-          stake: parseEther('2'),
-          withdrawStake: BigNumber.from(0),
+        const {amount, unstakeDelaySec, withdrawTime} = await entryPoint.getDepositInfo(addr)
+        expect({amount, unstakeDelaySec, withdrawTime}).to.eql({
+          amount: parseEther('2'),
+          unstakeDelaySec: 2,
           withdrawTime: 0
         })
       })
 
 
       it('should succeed to stake again', async () => {
-        const {stake} = await entryPoint.getStakeInfo(addr)
-        expect(stake).to.eq(TWO_ETH)
+        const {amount} = await entryPoint.getDepositInfo(addr)
         await entryPoint.addStake(2, {value: ONE_ETH})
-        const {stake: stakeAfter} = await entryPoint.getStakeInfo(addr)
-        expect(stakeAfter).to.eq(parseEther('3'))
+        const {amount: amountAfter} = await entryPoint.getDepositInfo(addr)
+        expect(amountAfter).to.eq(amount.add(ONE_ETH))
       })
       it('should fail to withdraw before unlock', async () => {
-        await expect(entryPoint.withdrawStake(AddressZero)).to.revertedWith('no unlocked stake')
+        await expect(entryPoint.withdrawTo(AddressZero, ONE_ETH)).to.revertedWith('must call unstakeDeposit() first')
       })
       describe('with unlocked stake', () => {
         before(async () => {
-          await entryPoint.unlockStake()
+          await entryPoint.unstakeDeposit()
         })
         it('should report as "not staked"', async () => {
           expect(await entryPoint.isPaymasterStaked(addr, TWO_ETH)).to.eq(false)
         })
         it('should report unstake state', async () => {
-          const withdrawTime1 = await ethers.provider.getBlock('latest').then(block => block.timestamp) + unstakeDelaySec
-          const {stake, withdrawStake, withdrawTime} = await entryPoint.getStakeInfo(addr)
-          expect({stake, withdrawStake, withdrawTime}).to.eql({
-            stake: BigNumber.from(0),
-            withdrawStake: parseEther('3'),
+          const withdrawTime1 = await ethers.provider.getBlock('latest').then(block => block.timestamp) + globalUnstakeDelaySec
+          const {amount, unstakeDelaySec, withdrawTime} = await entryPoint.getDepositInfo(addr)
+          expect({amount, unstakeDelaySec, withdrawTime}).to.eql({
+            amount: parseEther('3'),
+            unstakeDelaySec: 2,
             withdrawTime: withdrawTime1
           })
           expect(await entryPoint.isPaymasterStaked(addr, TWO_ETH)).to.eq(false)
         })
         it('should fail to withdraw before unlock timeout', async () => {
-          await expect(entryPoint.withdrawStake(AddressZero)).to.revertedWith('Withdrawal is not due')
+          await expect(entryPoint.withdrawTo(AddressZero, ONE_ETH)).to.revertedWith('Withdrawal is not due')
         })
         it('should fail to unlock again', async () => {
-          await expect(entryPoint.unlockStake()).to.revertedWith('already pending')
+          await expect(entryPoint.unstakeDeposit()).to.revertedWith('already unstaking')
         })
         describe('after unstake delay', () => {
           before(async () => {
@@ -135,10 +145,10 @@ describe("EntryPoint", function () {
 
               await ethersSigner.sendTransaction({to: addr})
               await entryPoint.addStake(2, {value: ONE_ETH})
-              const {stake, withdrawStake, withdrawTime} = await entryPoint.getStakeInfo(addr)
-              expect({stake, withdrawStake, withdrawTime}).to.eql({
-                stake: parseEther('4'),
-                withdrawStake: parseEther('0'),
+              const {amount, unstakeDelaySec, withdrawTime} = await entryPoint.getDepositInfo(addr)
+              expect({amount, unstakeDelaySec, withdrawTime}).to.eql({
+                amount: parseEther('4'),
+                unstakeDelaySec: 2,
                 withdrawTime: 0
               })
             } finally {
@@ -150,23 +160,25 @@ describe("EntryPoint", function () {
             expect(await entryPoint.isPaymasterStaked(addr, TWO_ETH)).to.eq(false)
           })
           it('should fail to unlock again', async () => {
-            await expect(entryPoint.unlockStake()).to.revertedWith('already pending')
+            await expect(entryPoint.unstakeDeposit()).to.revertedWith('already unstaking')
+          })
+          it( 'should fail to withdraw too much ', async()=>{
+            await expect(entryPoint.withdrawTo(AddressZero, FIVE_ETH)).to.revertedWith('Withdraw amount too large')
           })
           it('should succeed to withdraw', async () => {
-            const {withdrawStake} = await entryPoint.getStakeInfo(addr)
+            const {amount} = await entryPoint.getDepositInfo(addr)
             const addr1 = createWalletOwner().address
-            await entryPoint.withdrawStake(addr1)
-            expect(await ethers.provider.getBalance(addr1)).to.eq(withdrawStake)
-            const {stake, withdrawStake: withdrawStakeAfter, withdrawTime} = await entryPoint.getStakeInfo(addr)
+            await entryPoint.withdrawTo(addr1, amount)
+            expect(await ethers.provider.getBalance(addr1)).to.eq(amount)
+            const {amount: amountAfter, withdrawTime} = await entryPoint.getDepositInfo(addr)
 
-            expect({stake, withdrawStakeAfter, withdrawTime}).to.eql({
-              stake: BigNumber.from(0),
-              withdrawStakeAfter: BigNumber.from(0),
+            expect({amountAfter, withdrawTime}).to.eql({
+              amountAfter: BigNumber.from(0),
               withdrawTime: 0
             })
           })
           it('should fail to withdraw again', async () => {
-            await expect(entryPoint.withdrawStake(AddressZero)).to.revertedWith('no unlocked stake')
+            await expect(entryPoint.withdrawTo(AddressZero, 1)).to.revertedWith('must call unstakeDeposit() first')
           })
         })
       })
@@ -180,12 +192,12 @@ describe("EntryPoint", function () {
         await wallet.addDeposit({value: ONE_ETH})
         expect(await getBalance(wallet.address)).to.equal(0)
       })
-      it('should fail to unlock deposit (its not locked)', async () => {
+      it('should fail to unstakeDeposit if not staked', async () => {
         //wallet doesn't have "unlock" api, so we test it with static call.
-        await expect(entryPoint.connect(wallet.address).callStatic.unlockStake()).to.revertedWith('no stake')
+        await expect(entryPoint.connect(wallet.address).callStatic.unstakeDeposit()).to.revertedWith('not staked')
       })
       it('should withdraw with no unlock', async () => {
-        await wallet.withdrawDeposit(wallet.address)
+        await wallet.withdrawDepsitTo(wallet.address, ONE_ETH)
         expect(await getBalance(wallet.address)).to.equal(1e18)
       })
     })
@@ -319,7 +331,7 @@ describe("EntryPoint", function () {
         console.log('  == est gas=', await entryPoint.estimateGas.handleOps([op], redeemerAddress, {maxFeePerGas: 1e9}).then(tostr))
 
         const balBefore = await getBalance(wallet.address)
-        const stakeBefore = await entryPoint.getStakeInfo(wallet.address).then(info => info.stake)
+        const stakeBefore = await entryPoint.getDepositInfo(wallet.address).then(info => info.amount)
         //must specify at least one of maxFeePerGas, gasLimit
         // (gasLimit, to prevent estimateGas to fail on missing maxFeePerGas, see above..)
         const rcpt = await entryPoint.handleOps([op], redeemerAddress, {
@@ -332,7 +344,7 @@ describe("EntryPoint", function () {
         console.log('rcpt.gasUsed=', rcpt.gasUsed.toString(), rcpt.transactionHash)
 
         const balAfter = await getBalance(wallet.address)
-        const stakeAfter = await entryPoint.getStakeInfo(wallet.address).then(info => info.stake)
+        const stakeAfter = await entryPoint.getDepositInfo(wallet.address).then(info => info.amount)
         expect(balAfter).to.equal(balBefore, 'should pay from stake, not balance')
         let stakeUsed = stakeBefore.sub(stakeAfter)
         expect(await ethers.provider.getBalance(redeemerAddress)).to.equal(stakeUsed)

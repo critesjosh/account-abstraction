@@ -47,8 +47,6 @@ contract EntryPoint is StakeManager {
         paymasterStake = _paymasterStake;
     }
 
-    receive() external payable {}
-
     /**
      * Execute the given UserOperation.
      * @param op the operation to execute
@@ -74,7 +72,9 @@ contract EntryPoint is StakeManager {
     }
 
     function redeem(address payable redeemer, uint amount) internal {
-        redeemer.transfer(amount);
+        console.log("redeemer %s amt %s balance %s", redeemer, amount, address(this).balance );
+        (bool success,) = redeemer.call{value:amount}("");
+        require(success);
     }
 
     function handleOps(UserOperation[] calldata ops, address payable redeemer) public {
@@ -240,7 +240,6 @@ contract EntryPoint is StakeManager {
             revert FailedOp(opIndex, address(0), "");
         }
         uint actualEthPrefund = address(this).balance - preBalance;
-
         if (paymentMode == PaymentMode.walletEth) {
             if (actualEthPrefund < requiredEthPrefund) {
                 revert FailedOp(opIndex, address(0), "wallet didn't pay prefund");
@@ -304,7 +303,7 @@ contract EntryPoint is StakeManager {
     function getPaymastersStake(address[] calldata paymasters) external view returns (uint[] memory _stakes) {
         _stakes = new uint[](paymasters.length);
         for (uint i = 0; i < paymasters.length; i++) {
-            _stakes[i] = stakes[paymasters[i]].stake;
+            _stakes[i] = deposits[paymasters[i]].amount;
         }
     }
 
@@ -336,7 +335,7 @@ contract EntryPoint is StakeManager {
             actualGas += preGas - gasleft();
             actualGasCost = actualGas * gasPrice;
             //paymaster balance known to be high enough, and to be locked for this block
-            stakes[op.paymaster].stake -= uint96(actualGasCost);
+            internalDecrementDeposit(op.paymaster, actualGasCost);
         }
         _emitLog(op, actualGasCost, gasPrice, mode == IPaymaster.PostOpMode.opSucceeded);
     }
@@ -346,7 +345,7 @@ contract EntryPoint is StakeManager {
     }
 
     function _prefundFromSender(UserOperation calldata userOp, uint requiredPrefund) internal {
-        stakes[userOp.getSender()].stake -= uint96(requiredPrefund);
+        internalDecrementDeposit(userOp.getSender(), requiredPrefund);
     }
 
     function _refundSender(UserOperation calldata userOp, uint refund) internal {
@@ -356,7 +355,7 @@ contract EntryPoint is StakeManager {
     }
 
     function _refundSenderStake(UserOperation calldata userOp, uint refund) internal {
-        stakes[userOp.getSender()].stake += uint96(refund);
+        internalIncrementDeposit(userOp.getSender(), refund);
     }
 
     //validate a paymaster has enough stake (including for payment for this TX)

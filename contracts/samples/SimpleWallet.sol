@@ -72,9 +72,8 @@ contract SimpleWallet is IWallet {
 
     function _payPrefund(uint requiredPrefund) internal {
         if (requiredPrefund != 0) {
-            (bool success) = payable(msg.sender).send(requiredPrefund);
-            (success);
-            //ignore failure (its EntryPoint's job to verify, not wallet.)
+            (bool success,) = payable(msg.sender).call{value : requiredPrefund}("");
+            (success); //ignore failure (its EntryPoint's job to verify, not wallet.)
         }
     }
 
@@ -123,11 +122,17 @@ contract SimpleWallet is IWallet {
         }
     }
 
-    function addDeposit() public payable {
-        entryPoint.addDeposit{value : msg.value}();
+    function getDeposit() public view returns (uint) {
+        return entryPoint.balanceOf(address(this));
     }
 
-    function withdrawDeposit(address payable withdrawAddress) public {
-        entryPoint.withdrawStake(withdrawAddress);
+    function addDeposit() public payable {
+
+        (bool req,) = address(entryPoint).call{value : msg.value}("");
+        require(req);
+    }
+
+    function withdrawDepsitTo(address payable withdrawAddress, uint amount) public {
+        entryPoint.withdrawTo(withdrawAddress, amount);
     }
 }
