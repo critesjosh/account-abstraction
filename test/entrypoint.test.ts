@@ -405,7 +405,8 @@ describe("EntryPoint", function () {
         expect(await ethers.provider.getBalance(op.sender)).to.eq(0)
 
         await expect(entryPoint.callStatic.handleOps([op], redeemerAddress, {
-          gasLimit: 1e7
+          gasLimit: 1e7,
+          gasPrice: await ethers.provider.getGasPrice()
         })).to.revertedWith('didn\'t pay prefund')
 
         // await expect(await ethers.provider.getCode(op.sender).then(x => x.length)).to.equal(2, "wallet exists before creation")
