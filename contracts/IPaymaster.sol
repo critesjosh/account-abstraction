@@ -3,13 +3,11 @@ pragma solidity ^0.8.7;
 
 import "./UserOperation.sol";
 
+/**
+ * the interface exposed by a paymaster contract, who agrees to pay the gas for user's operations.
+ * a paymaster must hold a stake to cover the required entrypoint stake and also the gas for the transaction.
+ */
 interface IPaymaster {
-
-    enum PostOpMode {
-        opSucceeded, // user op succeeded
-        opReverted, // user op reverted. still has to pay for gas.
-        postOpReverted //user op succeeded, but caused postOp to revert. Now its a 2nd call, after user's op was deliberately reverted.
-    }
 
     /**
      * payment validation: check if paymaster agree to pay (using its stake)
@@ -34,4 +32,10 @@ interface IPaymaster {
      * @param actualGasCost - actual gas used so far (without this postOp call).
      */
     function postOp(PostOpMode mode, bytes calldata context, uint actualGasCost) external;
+
+    enum PostOpMode {
+        opSucceeded, // user op succeeded
+        opReverted, // user op reverted. still has to pay for gas.
+        postOpReverted //user op succeeded, but caused postOp to revert. Now its a 2nd call, after user's op was deliberately reverted.
+    }
 }

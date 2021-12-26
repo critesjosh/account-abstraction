@@ -202,6 +202,7 @@ describe("EntryPoint", function () {
       })
     })
   })
+
   describe('#simulateWalletValidation', () => {
     const walletOwner1 = createWalletOwner()
     let wallet1: SimpleWallet
@@ -242,7 +243,7 @@ describe("EntryPoint", function () {
       await entryPointView.callStatic.simulateWalletValidation(op1).catch(rethrow())
     })
 
-    it('should not use banned ops during simulateWalletValidation', async () => {
+    it('should not use banned ops during simulateValidation', async () => {
       const op1 = await fillAndSign({
         initCode: WalletConstructor(entryPoint.address, walletOwner1.address),
       }, walletOwner1, entryPoint)
@@ -331,7 +332,7 @@ describe("EntryPoint", function () {
         console.log('  == est gas=', await entryPoint.estimateGas.handleOps([op], redeemerAddress, {maxFeePerGas: 1e9}).then(tostr))
 
         const balBefore = await getBalance(wallet.address)
-        const stakeBefore = await entryPoint.getDepositInfo(wallet.address).then(info => info.amount)
+        const depositBefore = await entryPoint.balanceOf(wallet.address)
         //must specify at least one of maxFeePerGas, gasLimit
         // (gasLimit, to prevent estimateGas to fail on missing maxFeePerGas, see above..)
         const rcpt = await entryPoint.handleOps([op], redeemerAddress, {
@@ -344,10 +345,13 @@ describe("EntryPoint", function () {
         console.log('rcpt.gasUsed=', rcpt.gasUsed.toString(), rcpt.transactionHash)
 
         const balAfter = await getBalance(wallet.address)
-        const stakeAfter = await entryPoint.getDepositInfo(wallet.address).then(info => info.amount)
+        const depositAfter = await entryPoint.balanceOf(wallet.address)
         expect(balAfter).to.equal(balBefore, 'should pay from stake, not balance')
-        let stakeUsed = stakeBefore.sub(stakeAfter)
-        expect(await ethers.provider.getBalance(redeemerAddress)).to.equal(stakeUsed)
+        let depositUsed = depositBefore.sub(depositAfter)
+        console.log('redeemer', (await getBalance(redeemerAddress))/1e9)
+        // @ts-ignore
+        console.log('depused=', depositUsed/1e9, depositAfter/1e9, depositBefore/1e9)
+        expect(await ethers.provider.getBalance(redeemerAddress)).to.equal(depositUsed)
 
         await calcGasUsage(rcpt, entryPoint, redeemerAddress)
       });

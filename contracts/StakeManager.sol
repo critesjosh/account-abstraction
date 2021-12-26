@@ -51,7 +51,7 @@ contract StakeManager {
         return deposits[account];
     }
 
-    function balanceOf(address account) external view returns (uint) {
+    function balanceOf(address account) public view returns (uint) {
         return deposits[account].amount;
     }
 
