@@ -30,7 +30,7 @@ contract EntryPoint is StakeManager {
     //handleOps reverts with this error struct, to mark the offending op
     // NOTE: if simulateOp passes successfully, there should be no reason for handleOps to fail on it.
     // @param opIndex - index into the array of ops to the failed one (in simulateOp, this is always zero)
-    // @param paymaster - if paymaster.verifyPaymasterUserOp fails, this will be the paymaster's address. if verifyUserOp failed,
+    // @param paymaster - if paymaster.validatePaymasterUserOp fails, this will be the paymaster's address. if validateUserOp failed,
     //      this value will be zero (since it failed before accessing the paymaster)
     // @param reason - revert reason
     //  only to aid troubleshooting of wallet/paymaster reverts
@@ -137,7 +137,7 @@ contract EntryPoint is StakeManager {
     }
 
     /**
-     * Simulate a call to wallet.verifyUserOp and paymaster.verifyPaymasterUserOp.
+     * Simulate a call to wallet.validateUserOp and paymaster.validatePaymasterUserOp.
      * Validation succeeds of the call doesn't revert.
      * @dev The node must also verify it doesn't use banned opcodes, and that it doesn't reference storage outside the wallet's data.
      *      In order to split the running opcodes of the wallet (validateUserOp) from the paymaster's validatePaymasterUserOp,
@@ -149,15 +149,15 @@ contract EntryPoint is StakeManager {
     }
 
     /**
-     * Simulate a call for wallet.verifyUserOp.
+     * Simulate a call for wallet.validateUserOp.
      * Call must not revert.
      * @dev The node must also verify it doesn't use banned opcode, and that it doesn't reference storage outside the wallet's data
-     * @return gasUsedByVerifySelfOp - gas used by the validation, to pass into simulatePaymasterValidation.
+     * @return gasUsedByValidateUserOp - gas used by the validation, to pass into simulatePaymasterValidation.
      */
-    function simulateWalletValidation(UserOperation calldata userOp) external returns (uint gasUsedByVerifySelfOp){
+    function simulateWalletValidation(UserOperation calldata userOp) external returns (uint gasUsedByValidateUserOp){
         require(msg.sender == address(0), "must be called off-chain with from=zero-addr");
         (uint requiredPreFund, PaymentMode paymentMode) = getPaymentInfo(userOp);
-        (gasUsedByVerifySelfOp,) = _validateWalletPrepayment(0, userOp, requiredPreFund, paymentMode);
+        (gasUsedByValidateUserOp,) = _validateWalletPrepayment(0, userOp, requiredPreFund, paymentMode);
     }
 
     function getPaymentInfo(UserOperation calldata userOp) internal view returns (uint requiredPrefund, PaymentMode paymentMode) {
@@ -170,19 +170,19 @@ contract EntryPoint is StakeManager {
     }
 
     /**
-     * Simulate a call to paymaster.verifyPaymasterUserOp.
+     * Simulate a call to paymaster.validatePaymasterUserOp.
      * do nothing if has no paymaster.
      * @dev The node must also verify it doesn't use banned opcode, and that it doesn't reference storage outside the paymaster's data
      * @param userOp the user operation to validate.
-     * @param gasUsedByVerifySelfOp - the gas returned by simulateWalletValidation, as these 2 calls should share
+     * @param gasUsedByValidateUserOp - the gas returned by simulateWalletValidation, as these 2 calls should share
      *  the same userOp.validationGas quota.
      */
-    function simulatePaymasterValidation(UserOperation calldata userOp, uint gasUsedByVerifySelfOp) external view returns (bytes memory context, uint gasUsedByPayForOp){
+    function simulatePaymasterValidation(UserOperation calldata userOp, uint gasUsedByValidateUserOp) external view returns (bytes memory context, uint gasUsedByPayForOp){
         (uint requiredPreFund, PaymentMode paymentMode) = getPaymentInfo(userOp);
         if (paymentMode != PaymentMode.paymasterStake) {
             return ("", 0);
         }
-        return _validatePaymasterPrepayment(0, userOp, requiredPreFund, gasUsedByVerifySelfOp);
+        return _validatePaymasterPrepayment(0, userOp, requiredPreFund, gasUsedByValidateUserOp);
     }
 
     // create the sender's contract if needed.
@@ -214,9 +214,9 @@ contract EntryPoint is StakeManager {
         return address(uint160(uint256(hash)));
     }
 
-    //call wallet.verifyUserOp, and validate that it paid as needed.
+    //call wallet.validateUserOp, and validate that it paid as needed.
     // return actual value sent from wallet to "this"
-    function _validateWalletPrepayment(uint opIndex, UserOperation calldata op, uint requiredPrefund, PaymentMode paymentMode) internal returns (uint gasUsedByVerifySelfOp, uint prefund) {
+    function _validateWalletPrepayment(uint opIndex, UserOperation calldata op, uint requiredPrefund, PaymentMode paymentMode) internal returns (uint gasUsedByValidateUserOp, uint prefund) {
         uint preGas = gasleft();
         _createSenderIfNeeded(op);
         uint requiredEthPrefund = 0;
@@ -225,7 +225,7 @@ contract EntryPoint is StakeManager {
             uint bal = balanceOf(sender);
             requiredEthPrefund = bal > requiredPrefund ? 0 : requiredPrefund - bal;
         }
-        try IWallet(sender).verifyUserOp{gas : op.verificationGas}(op, requiredEthPrefund) {
+        try IWallet(sender).validateUserOp{gas : op.verificationGas}(op, requiredEthPrefund) {
         } catch Error(string memory revertReason) {
             revert FailedOp(opIndex, address(0), revertReason);
         } catch {
@@ -240,18 +240,18 @@ contract EntryPoint is StakeManager {
         } else {
             prefund = 0;
         }
-        gasUsedByVerifySelfOp = preGas - gasleft();
+        gasUsedByValidateUserOp = preGas - gasleft();
     }
 
-    //validate paymaster.verifyPaymasterUserOp
-    function _validatePaymasterPrepayment(uint opIndex, UserOperation calldata op, uint requiredPreFund, uint gasUsedByVerifySelfOp) internal view returns (bytes memory context, uint gasUsedByPayForOp) {
+    //validate paymaster.validatePaymasterUserOp
+    function _validatePaymasterPrepayment(uint opIndex, UserOperation calldata op, uint requiredPreFund, uint gasUsedByValidateUserOp) internal view returns (bytes memory context, uint gasUsedByPayForOp) {
         uint preGas = gasleft();
         if (!isValidStake(op, requiredPreFund)) {
             revert FailedOp(opIndex, op.paymaster, "not enough stake");
         }
         //no pre-pay from paymaster
-        uint gas = op.verificationGas - gasUsedByVerifySelfOp;
-        try IPaymaster(op.paymaster).verifyPaymasterUserOp{gas : gas}(op, requiredPreFund) returns (bytes memory _context){
+        uint gas = op.verificationGas - gasUsedByValidateUserOp;
+        try IPaymaster(op.paymaster).validatePaymasterUserOp{gas : gas}(op, requiredPreFund) returns (bytes memory _context){
             context = _context;
         } catch Error(string memory revertReason) {
             revert FailedOp(opIndex, op.paymaster, revertReason);
@@ -264,11 +264,11 @@ contract EntryPoint is StakeManager {
     function _validatePrepayment(uint opIndex, UserOperation calldata userOp) private returns (uint prefund, PaymentMode paymentMode, bytes memory context){
 
         uint preGas = gasleft();
-        uint gasUsedByVerifySelfOp;
+        uint gasUsedByValidateUserOp;
         uint requiredPreFund;
         (requiredPreFund, paymentMode) = getPaymentInfo(userOp);
 
-        (gasUsedByVerifySelfOp, prefund) = _validateWalletPrepayment(opIndex, userOp, requiredPreFund, paymentMode);
+        (gasUsedByValidateUserOp, prefund) = _validateWalletPrepayment(opIndex, userOp, requiredPreFund, paymentMode);
 
         //a "marker" where wallet opcode validation is done, by paymaster opcode validation is about to start
         // (used only by off-chain simulateValidation)
@@ -277,7 +277,7 @@ contract EntryPoint is StakeManager {
 
         uint gasUsedByPayForOp = 0;
         if (paymentMode == PaymentMode.paymasterStake) {
-            (context, gasUsedByPayForOp) = _validatePaymasterPrepayment(opIndex, userOp, requiredPreFund, gasUsedByVerifySelfOp);
+            (context, gasUsedByPayForOp) = _validatePaymasterPrepayment(opIndex, userOp, requiredPreFund, gasUsedByValidateUserOp);
         } else {
             context = "";
         }

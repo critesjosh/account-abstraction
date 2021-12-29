@@ -63,7 +63,7 @@ contract SimpleWallet is IWallet {
         require(msg.sender == address(entryPoint), "wallet: not from EntryPoint");
     }
 
-    function verifyUserOp(UserOperation calldata userOp, uint requiredPrefund) external override {
+    function validateUserOp(UserOperation calldata userOp, uint requiredPrefund) external override {
         _requireFromEntryPoint();
         _validateSignature(userOp);
         _validateAndIncrementNonce(userOp);
@@ -77,7 +77,7 @@ contract SimpleWallet is IWallet {
         }
     }
 
-    //called by entryPoint, only after verifyUserOp succeeded.
+    //called by entryPoint, only after validateUserOp succeeded.
     function execFromEntryPoint(address dest, uint value, bytes calldata func) external {
         _requireFromEntryPoint();
         _call(dest, value, func);

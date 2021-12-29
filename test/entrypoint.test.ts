@@ -225,13 +225,13 @@ describe("EntryPoint", function () {
       const op = await fillAndSign({sender: wallet1.address}, walletOwner1, entryPoint)
       await expect(entryPoint.simulateWalletValidation(op)).to.revertedWith('must be called off-chain')
     });
-    it('should fail if verifyUserOp fails', async () => {
+    it('should fail if validateUserOp fails', async () => {
       //using wrong owner for wallet1
       const op = await fillAndSign({sender: wallet1.address}, walletOwner, entryPoint)
       await expect(entryPointView.callStatic.simulateWalletValidation(op).catch(rethrow())).to
         .revertedWith('wrong signature')
     });
-    it('should succeed if verifyUserOp succeeds', async () => {
+    it('should succeed if validateUserOp succeeds', async () => {
       const op = await fillAndSign({sender: wallet1.address}, walletOwner1, entryPoint)
       await fund(wallet1)
       const ret = await entryPointView.callStatic.simulateWalletValidation(op).catch(rethrow())

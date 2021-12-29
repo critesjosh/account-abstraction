@@ -17,5 +17,5 @@ interface IWallet {
      *      can be withdrawn anytime using "entryPoint.withdrawTo()"
      *      In case there is a paymaster in the request (or the current deposit is high enough), this value will be zero.
      */
-    function verifyUserOp(UserOperation calldata userOp, uint requiredPrefund) external;
+    function validateUserOp(UserOperation calldata userOp, uint requiredPrefund) external;
 }
