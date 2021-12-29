@@ -44,7 +44,7 @@ contract StakeManager {
         uint64 withdrawTime;
     }
 
-    /// maps relay managers to their deposits
+    /// maps accounts to their deposits
     mapping(address => DepositInfo) public deposits;
 
     function getDepositInfo(address account) external view returns (DepositInfo memory info) {
@@ -109,6 +109,7 @@ contract StakeManager {
     /**
      * withdraw from the deposit.
      * will fail if the deposit is already staked or too low.
+     * after a paymaster unlocks and withdraws some of the value, it must call addStake() to stake the value again.
      * @param withdrawAddress the address to send withdrawn value.
      * @param withdrawAmount the amount to withdraw.
      */
@@ -117,14 +118,14 @@ contract StakeManager {
         if (info.unstakeDelaySec != 0) {
             require(info.withdrawTime > 0, "must call unstakeDeposit() first");
             require(info.withdrawTime <= block.timestamp, "Withdrawal is not due");
-            info.withdrawTime = 0;
         }
         require(withdrawAmount <= info.amount, "Withdraw amount too large");
+
+        // store the remaining value, with stake info cleared.
         deposits[msg.sender] = DepositInfo(
             info.amount - uint112(withdrawAmount),
-            info.unstakeDelaySec,
-            0
-        );
+            0,
+            0);
         withdrawAddress.transfer(withdrawAmount);
         emit Withdrawn(msg.sender, withdrawAddress, withdrawAmount);
     }

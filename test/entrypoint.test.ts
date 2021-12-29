@@ -165,20 +165,31 @@ describe("EntryPoint", function () {
           it( 'should fail to withdraw too much ', async()=>{
             await expect(entryPoint.withdrawTo(AddressZero, FIVE_ETH)).to.revertedWith('Withdraw amount too large')
           })
-          it('should succeed to withdraw', async () => {
+          it('should succeed to withdraw some deposit', async () => {
+            const {amount} = await entryPoint.getDepositInfo(addr)
+            const addr1 = createWalletOwner().address
+            await entryPoint.withdrawTo(addr1, ONE_ETH)
+            expect(await ethers.provider.getBalance(addr1)).to.eq(ONE_ETH)
+            const {amount: amountAfter, withdrawTime, unstakeDelaySec} = await entryPoint.getDepositInfo(addr)
+
+            expect({amountAfter, withdrawTime, unstakeDelaySec}).to.eql({
+              amountAfter: amount.sub(ONE_ETH),
+              unstakeDelaySec: 0,
+              withdrawTime: 0
+            })
+          })
+          it('should succeed to withdraw the rest', async () => {
             const {amount} = await entryPoint.getDepositInfo(addr)
             const addr1 = createWalletOwner().address
             await entryPoint.withdrawTo(addr1, amount)
             expect(await ethers.provider.getBalance(addr1)).to.eq(amount)
-            const {amount: amountAfter, withdrawTime} = await entryPoint.getDepositInfo(addr)
+            const {amount: amountAfter, withdrawTime, unstakeDelaySec} = await entryPoint.getDepositInfo(addr)
 
-            expect({amountAfter, withdrawTime}).to.eql({
+            expect({amountAfter, withdrawTime, unstakeDelaySec}).to.eql({
               amountAfter: BigNumber.from(0),
+              unstakeDelaySec: 0,
               withdrawTime: 0
             })
-          })
-          it('should fail to withdraw again', async () => {
-            await expect(entryPoint.withdrawTo(AddressZero, 1)).to.revertedWith('must call unstakeDeposit() first')
           })
         })
       })
